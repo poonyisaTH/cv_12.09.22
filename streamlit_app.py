@@ -1,46 +1,116 @@
 
-import streamlit as st
 import pandas as pd
-import numpy as np
+import streamlit as st
+from pandas import DataFrame
+import google_auth_httplib2
+import httplib2
 
-private_gsheets_url = "https://docs.google.com/spreadsheets/d/1DZUnRl0vcmpP5rC4eUwIQy-CM1BQ2XYK6Sy_4vsLpRU/edit?usp=sharing"
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import HttpRequest
 
-type = "service_account"
-project_id = "xxx"
-private_key_id = "xxx"
-private_key = "xxx"
-client_email = "xxx"
-client_id = "xxx"
-auth_uri = "https://accounts.google.com/o/oauth2/auth"
-token_uri = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "xxx"
+SCOPE = "https://www.googleapis.com/auth/spreadsheets"
+SPREADSHEET_ID = "1DZUnRl0vcmpP5rC4eUwIQy-CM1BQ2XYK6Sy_4vsLpRU"
+SHEET_NAME = "Sheet1"
+GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
+from gsheetsdb import connect
+
+# Create a connection object.
+conn = connect()
+
+# Perform SQL query on the Google Sheet.
+# Uses st.cache to only rerun when the query changes or after 10 min.
+@st.cache(ttl=600)
+def run_query(query):
+    rows = conn.execute(query, headers=1)
+    rows = rows.fetchall()
+    return rows
+
+sheet_url = st.secrets["private_gsheets_url"]
+rows = run_query(f'SELECT * FROM "{sheet_url}"')
 
 
 
-st.title('การประเมินความเสี่ยงในการเกิดโรคหัวใจ')
-st.subheader('ศูนย์การแพทย์กาญจนาภิเษก')
+
+@st.experimental_singleton()
+def connect_to_gsheet():
+    # Create a connection object.
+    credentials = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=[SCOPE],
+    )
+
+    # Create a new Http() object for every request
+    def build_request(http, *args, **kwargs):
+        new_http = google_auth_httplib2.AuthorizedHttp(
+            credentials, http=httplib2.Http()
+        )
+        return HttpRequest(new_http, *args, **kwargs)
+
+    authorized_http = google_auth_httplib2.AuthorizedHttp(
+        credentials, http=httplib2.Http()
+    )
+    service = build(
+        "sheets",
+        "v4",
+        requestBuilder=build_request,
+        http=authorized_http,
+    )
+    gsheet_connector = service.spreadsheets()
+    return gsheet_connector
 
 
-#database
-title = st.text_input('ชื่อ-สกุล')
-gender = st.radio('เพศ',('ชาย','หญิง'))
-telephone = st.text_input('เบอร์โทรศัพท์')
-current_address = st.selectbox('ที่อยู่ปัจจุบัน',('ในเขตมหาสวัสดิ์','นอกเขต'))
-age = st.number_input('อายุ (ปี)',0,130,50)
-smoking = st.selectbox('สูบบุหรี',('ไม่สูบ','สูบ'))
-fbs = st.radio('เบาหวาน',('ไม่เป็น','เป็น'))
+def get_data(gsheet_connector) -> pd.DataFrame:
+    values = (
+        gsheet_connector.values()
+        .get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A:J",
+        )
+        .execute()
+    )
 
-    #show if have diabets
+    df = pd.DataFrame(values["values"])
+    df.columns = df.iloc[0]
+    df = df[1:]
+    return df
+
+
+def add_row_to_gsheet(gsheet_connector, row) -> None:
+    gsheet_connector.values().append(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{SHEET_NAME}!A:J",
+        body=dict(values=row),
+        valueInputOption="USER_ENTERED",
+    ).execute()
+
+gsheet_connector = connect_to_gsheet()
+
+#detail  
+form = st.form(key="annotation")
+with form:
+   
+    st.title('ประเมินความเสี่ยงในการเกิดโรคหัวใจ')
+    st.subheader('ศูนย์การแพทย์กาญจนาภิเษก')
+
+
+    title = st.text_input('✍️ชื่อ-สกุล')
+    gender = st.radio('เพศ',('ชาย','หญิง'))
+    telephone = st.text_input('เบอร์โทรศัพท์')
+    current_address = st.selectbox('ที่อยู่ปัจจุบัน',('ในเขตมหาสวัสดิ์','นอกเขต'))
+    age = st.number_input('อายุ (ปี)',0,130,50)
+    smoking = st.selectbox('สูบบุหรี',('ไม่สูบ','สูบ'))
+    fbs = st.radio('เบาหวาน',('ไม่เป็น','เป็น'))
+    blood_pressure_up = st.number_input('ความดันโลหิตตัวบน(mmHg.)',0)
+    blood_pressure_down = st.number_input('ความดันโลหิตตัวล่าง(mmHg.)',0)
+    waist = st.number_input('รอบเอว (ซม.)',0)
+    submitted = st.form_submit_button(label="Submit")
+
+#show if have diabets
 if(fbs=='เป็น'):
-   cal_fbs=5
+    cal_fbs=5
 else:
     cal_fbs=0
-
-
-blood_pressure_up = st.number_input('ความดันโลหิตตัวบน(mmHg.)',0)
-blood_pressure_down = st.number_input('ความดันโลหิตตัวล่าง(mmHg.)',0)
-waist = st.number_input('รอบเอว (ซม.)',0)
 
 #cal_age
 if (age<=39):
@@ -86,7 +156,7 @@ else:
 #Total_score
 Total_score=int(cal_age+cal_BP+cal_gender+cal_smoking+cal_waist+cal_fbs)
 
-#chance
+#chance of diseases
 if (Total_score<=0):
     chance=0
 elif(Total_score<=5):
@@ -107,7 +177,29 @@ elif(Total_score<=15):
     chance=10
 elif(Total_score>=16):
     chance=12
-    
+
+# percentage of diseases
+if (chance == 0):
+    p_diseases = '0 %'
+elif(chance==1):
+    p_diseases = '1 %'
+elif(chance==2):
+    p_diseases = '2 %'
+elif(chance==3):
+    p_diseases = '3 %'
+elif(chance==4):
+    p_diseases = '4 %'
+elif(chance==5):
+    p_diseases = '5 %'
+elif(chance==7):
+    p_diseases = '7 %'
+elif(chance==8):
+    p_diseases = '8 %'
+elif(chance==10):
+    p_diseases = '10 %'
+elif(chance==12):
+    p_diseases = '12 %'
+
 #Group
 if(chance<=1):
     Group='ความเสี่ยงน้อย'
@@ -129,24 +221,13 @@ elif(Group=='ความเสี่ยงสูงมาก'):
     suggestion='ควรปรับเปลี่ยนพฤติกรรม เลิกบุหรี่ ออกกำลังกาย ควบคุมอาหาร รักษาความดันโลหิตอย่างเข็มงวด ลดความอ้วน และรีบปรึกษาแพทย์ เพื่อขอคำแนะนำที่ถูกต้องทันที'
 
 
-#button
-if(st.button('บันทึกข้อมูล')):
-   st.write('คะแนนของคุณ =',Total_score)
 
-   if(Group=='ความเสี่ยงน้อย'):
-    st.success('ความเสี่ยงน้อย')
-   elif(Group=='ความเสี่ยงปานกลาง'):
-    st.warning('ความเสี่ยงปานกลาง')
-   elif(Group=='ความเสี่ยงสูง'):
-    st.error('ความเสี่ยงสูง')
-   elif(Group=='ความเสี่ยงสูงมาก'):
-    st.error('ความเสี่ยงสูงมาก')
-
-   if(suggestion=='สุขภาพของคุณอยู่ในเกณฑ์ดี ควรออกกำลังกายอย่างสม่ำเสมอ และตรวจสุขภาพประจำปีเพื่อป้องกันการเกิดโรคหลอดเลือดหัวใจ'):
-    st.success('สุขภาพของคุณอยู่ในเกณฑ์ดี ควรออกกำลังกายอย่างสม่ำเสมอ และตรวจสุขภาพประจำปีเพื่อป้องกันการเกิดโรคหลอดเลือดหัวใจ')
-   elif(suggestion=='ควรออกกำลังกายสม่ำเสมอ ควรควบคุมอาหารรสหวาน มัน และเค็มจัด งดการสูบบุหรี่ทันที และควรปรึกษาแพทย์เพื่อขอคำแนะนำที่ถูกต้องต่อไป'):
-    st.warning('ควรออกกำลังกายสม่ำเสมอ ควรควบคุมอาหารรสหวาน มัน และเค็มจัด งดการสูบบุหรี่ทันที และควรปรึกษาแพทย์เพื่อขอคำแนะนำที่ถูกต้องต่อไป')
-   elif(suggestion=='ควรออกกำลังกายอย่างสม่ำเสมอ ควรควบคุมอาหารรสหวาน มัน และเค็มจัด งดการสูบบุหรี่ทันที และควรปรึกษาแพทย์เพื่อขอคำแนะนำที่ถูกต้องโดยเร็ว'):
-    st.error('ควรออกกำลังกายอย่างสม่ำเสมอ ควรควบคุมอาหารรสหวาน มัน และเค็มจัด งดการสูบบุหรี่ทันที และควรปรึกษาแพทย์เพื่อขอคำแนะนำที่ถูกต้องโดยเร็ว')
-   elif(suggestion=='ควรปรับเปลี่ยนพฤติกรรม เลิกบุหรี่ ออกกำลังกาย ควบคุมอาหาร รักษาความดันโลหิตอย่างเข็มงวด ลดความอ้วน และรีบปรึกษาแพทย์ เพื่อขอคำแนะนำที่ถูกต้องทันที'):
-    st.error('ควรปรับเปลี่ยนพฤติกรรม เลิกบุหรี่ ออกกำลังกาย ควบคุมอาหาร รักษาความดันโลหิตอย่างเข็มงวด ลดความอ้วน และรีบปรึกษาแพทย์ เพื่อขอคำแนะนำที่ถูกต้องทันที') 
+if submitted:
+    add_row_to_gsheet(
+        gsheet_connector,
+        [[title,gender,telephone,current_address,age,smoking,fbs,blood_pressure_up,blood_pressure_down,waist]],
+    )
+    st.write('✅ คะแนนของคุณ 👉',Total_score)
+    st.write('✅ ระดับความเสี่ยงต่อการเกิดโรคเส้นเลือดหัวใจ และหลอดเลือดในระยะเวลา 10 ปีของท่าน 👉',p_diseases)
+    st.write('✅ จัดอยู่ในกลุ่ม 👉',Group)
+    st.write('✅ ข้อแนะนำเบื้องต้น :',suggestion)
