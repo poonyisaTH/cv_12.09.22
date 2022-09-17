@@ -4,6 +4,7 @@ import streamlit as st
 from pandas import DataFrame
 import google_auth_httplib2
 import httplib2
+import matplotlib.pyplot as plt
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -65,7 +66,7 @@ def get_data(gsheet_connector) -> pd.DataFrame:
         gsheet_connector.values()
         .get(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!A:J",
+            range=f"{SHEET_NAME}!A:N",
         )
         .execute()
     )
@@ -79,7 +80,7 @@ def get_data(gsheet_connector) -> pd.DataFrame:
 def add_row_to_gsheet(gsheet_connector, row) -> None:
     gsheet_connector.values().append(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"{SHEET_NAME}!A:J",
+        range=f"{SHEET_NAME}!A:N",
         body=dict(values=row),
         valueInputOption="USER_ENTERED",
     ).execute()
@@ -88,23 +89,29 @@ gsheet_connector = connect_to_gsheet()
 
 #detail  
 form = st.form(key="annotation")
+
+def clear_form():
+    st.session_state["ชื่อ-สกุล"] = ""
+    st.session_state["เบอร์โทรศัพท์"] = ""
+    st.session_state["อายุ (ปี)"] = ""
 with form:
    
     st.title('ประเมินความเสี่ยงในการเกิดโรคหัวใจ')
     st.subheader('ศูนย์การแพทย์กาญจนาภิเษก')
 
-
-    title = st.text_input('✍️ชื่อ-สกุล')
+   
+    title = st.text_input('✍️ชื่อ-สกุล',key='ชื่อ-สกุล')
     gender = st.radio('เพศ',('ชาย','หญิง'))
-    telephone = st.text_input('เบอร์โทรศัพท์')
+    telephone = st.text_input('เบอร์โทรศัพท์',key='เบอร์โทรศัพท์')
     current_address = st.selectbox('ที่อยู่ปัจจุบัน',('ในเขตมหาสวัสดิ์','นอกเขต'))
-    age = st.number_input('อายุ (ปี)',0,130,50)
+    age = st.number_input('อายุ (ปี)',0,130)
     smoking = st.selectbox('สูบบุหรี',('ไม่สูบ','สูบ'))
     fbs = st.radio('เบาหวาน',('ไม่เป็น','เป็น'))
     blood_pressure_up = st.number_input('ความดันโลหิตตัวบน(mmHg.)',0)
     blood_pressure_down = st.number_input('ความดันโลหิตตัวล่าง(mmHg.)',0)
     waist = st.number_input('รอบเอว (ซม.)',0)
     submitted = st.form_submit_button(label="Submit")
+    clear = st.form_submit_button(label="Clear", on_click=clear_form)
 
 #show if have diabets
 if(fbs=='เป็น'):
@@ -225,9 +232,14 @@ elif(Group=='ความเสี่ยงสูงมาก'):
 if submitted:
     add_row_to_gsheet(
         gsheet_connector,
-        [[title,gender,telephone,current_address,age,smoking,fbs,blood_pressure_up,blood_pressure_down,waist]],
+        [[title,gender,telephone,current_address,age,smoking,fbs,blood_pressure_up,blood_pressure_down,waist,Total_score,p_diseases,Group,suggestion]],
     )
     st.write('✅ คะแนนของคุณ 👉',Total_score)
     st.write('✅ ระดับความเสี่ยงต่อการเกิดโรคเส้นเลือดหัวใจ และหลอดเลือดในระยะเวลา 10 ปีของท่าน 👉',p_diseases)
     st.write('✅ จัดอยู่ในกลุ่ม 👉',Group)
     st.write('✅ ข้อแนะนำเบื้องต้น :',suggestion)
+
+expander = st.expander("See all records")
+with expander:
+    st.write(f"Open original [Google Sheet]({GSHEET_URL})")
+    st.dataframe(get_data(gsheet_connector))
