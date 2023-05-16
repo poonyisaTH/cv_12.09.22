@@ -1,5 +1,5 @@
 streamlit == 1.21.0
-pandas==2.0.1
+pandas>=0.25
 gspread_pandas==3.2.2
 google-auth==2.18.0
 google_api_python_client
