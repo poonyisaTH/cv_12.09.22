@@ -6,3 +6,4 @@ google_api_python_client
 gsheetsdb==0.1.13.1
 google-oauth2-tool ==0.0.3
 gspread==5.9.0
+google-auth-httplib2==0.1.0
